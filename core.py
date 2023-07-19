@@ -27,7 +27,7 @@ class VkTools():
                      'bdate': info.get('bdate') if info.get('bdate') is not None else None,   #см. 1;13;16
                      'home_town': info.get('home_town'),
                      'sex': info.get('sex'),
-                     'city': info.get('city')['id'] if info.get('city') is not None else None
+                     'city_id': info.get('city')['id'] if info.get('city') is not None else None
                      }
         
         return user_info
@@ -35,7 +35,7 @@ class VkTools():
     def serch_users(self, params, offset):
 
         sex = 1 if params['sex'] == 2 else 2
-        city = params['city']
+        city_id = params['city_id']
         curent_year = datetime.now().year
         user_year = int(params['bdate'].split('.')[2])
         age = curent_year - user_year
@@ -50,7 +50,7 @@ class VkTools():
                                 'age_from': age_from,
                                 'age_to': age_to,
                                 'sex': sex,
-                                'city': city,
+                                'city': city_id,
                                 'status': 6,
                                 'is_closed': False
                                 }

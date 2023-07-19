@@ -1,5 +1,7 @@
 # импорты
 import vk_api
+import datetime
+from datetime import datetime
 from vk_api.longpoll import VkLongPoll, VkEventType # инструменты VK
 from vk_api.utils import get_random_id	            # для генерации рандомного индетификатора
 from pprint import pprint
@@ -12,6 +14,8 @@ class BotInterface():
     # инициализация класса self
     def __init__(self,comunity_token, acces_token):
         self.interface = vk_api.VkApi(token=comunity_token)	# здесь инициализация нашего API и дальше для работы с ней нужно обращаться к объекту interface, т.к. он уже авторизован на стороне VK. А точнее к атрибуту класса self.
+        self.interface2 = vk_api.VkApi(token=acces_token)
+        self.longpoll = VkLongPoll(self.interface)	# все события пользователя регестрируется в этом массиве
         self.api = VkTools(acces_token)
         self.profile_param = None
         self.users =[]
@@ -33,15 +37,16 @@ class BotInterface():
         if s_bdate is None or s_bdate.find(".", 3) == -1:
             self.message_send(user_id, f'Не удалось определить Вашу дату рождения. Просьба указать ее в формате ДД.ММ.ГГГГ')
             key = 'bdate'
-        elif params.get('sex') is None:
-            self.message_send(user_id, f'Не удалось определить Ваш пол. Просьба указать цифрами 1 - если женский, 2 - если мужской')
-            key = 'sex'
-        elif params.get('home_town') is None:
-            self.message_send(user_id, f'Не удалось определить Ваш родной город. Просьба указать в соответсвии с тем как будет искать в поиске')
-            key = 'home_town'
+        # А пол вообще не надо спрашивать, поскольку от бота пол скрыть вк не позволяет
+        #elif params.get('sex') is None:
+        #elif params.get('home_town') == '':
+        #    self.message_send(user_id, f'Не удалось определить Ваш родной город. Просьба указать город и через запятую регион в соответсвии с тем как будет искать в поиске')
+        #    key = 'home_town'
+        elif params.get('city_id') is None:
+            self.message_send(user_id, f'Не удалось определить Ваш город. Просьба указать город и через запятую регион в соответсвии с тем как будет искать в поиске')
+            key = 'city_id'
         else:
             key = ''
-        #do! 'city': info.get('city')['title'] if info.get('city') is not None else None
         return key
     # формирование строки для вложения
     def get_attachment(self, photos_user):
@@ -52,15 +57,56 @@ class BotInterface():
             if num == 2:
                 break
         return attach
+    # проверка ввода даты
+    def check_date(self, date_text):
+        try:
+            b_result = bool(datetime.strptime(date_text, "%d.%m.%Y"))
+        except ValueError:
+            b_result = False
+        return b_result
+    # проверка ввода города
+    def find_city_id(self, city_name, region_name=None):
+        city_id = None
+        try:
+            dict_cities = self.interface2.method('database.getCities', {'country_id':1, 'q': city_name, 'need_all':1, 'offset':0, 'count':1000})
+        except ValueError:
+            dict_cities = {}
+        cities = dict_cities.get('items') if dict_cities.get('items') is not None else []
+        if region_name is not None:
+            for city in cities:
+                if city['title'].lower() == city_name and city.get('region') == None:
+                    city_id = city['id']
+                    continue
+                if city['title'].lower() == city_name and city['region'].lower() == region_name:
+                    city_id = city['id']
+            return city_id
+        elif dict_cities['count'] == 1:
+            city_id = cities[0]['id']
+            return city_id
+        elif city_name == 'москва' or city_name == 'мск':
+            return 1
+        elif city_name == 'санкт-петербург' or city_name == 'спб':
+            return 2
+        elif dict_cities['count'] > 1:
+            return 0
+    def check_city(self, city_text):
+        list_input = city_text.split(',')
+        if len(list_input) == 2:
+            city_name = list_input[0].strip().lower()
+            region_name = list_input[1].strip().lower()
+            ret_city_id = self.find_city_id(city_name, region_name)
+        elif len(list_input) == 1:
+            city_name = list_input[0].strip().lower()
+            ret_city_id = self.find_city_id(city_name)
+        return ret_city_id
     # обработка событий / получение сообщения
     def event_handler(self):
         key = ''
         b_was_hello = False
         b_is_find_db = True
-        longpoll = VkLongPoll(self.interface)	# все события пользователя регестрируется в этом массиве
-
+        
         # слушаем и обрабатываем события
-        for event in longpoll.listen():
+        for event in self.longpoll.listen():
             # сообщение мне
             if event.type == VkEventType.MESSAGE_NEW and event.to_me:
                 command = event.text.lower()
@@ -97,8 +143,16 @@ class BotInterface():
                 elif command == 'пока':
                     self.message_send(event.user_id, 'пока')
                 # Проверка ответа на запрос и повторная проверка обязательных параметров
-                elif key != '':
-                    self.profile_param[key] = command
+                elif key == 'bdate':
+                    #если дата верная, то запишем
+                    if self.check_date (command):
+                        self.profile_param[key] = command
+                    key = self.check_top_user_par(event.user_id, self.profile_param)
+                elif key == 'home_town' or key == 'city_id':
+                    #если город находится, то запишем
+                    self.city_id = self.check_city(command)
+                    if self.city_id is not None and self.city_id > 0:
+                        self.profile_param[key] = self.city_id
                     key = self.check_top_user_par(event.user_id, self.profile_param)
                 else:
                     self.message_send(event.user_id, 'команда не опознана')
@@ -106,5 +160,5 @@ class BotInterface():
 if __name__ == '__main__':
     bot = BotInterface(comunity_token, acces_token)
     bot.event_handler()
-    #test pprint(self.profile_param)
+    #test    pprint(bot.check_city('уфа') )
             
